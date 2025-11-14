@@ -96,6 +96,112 @@ def preparar_bases(kpi_df, fid_df, painel_df):
             )
     return kpi_final, aba_nome, fidelizados, painel
 
+def gerar_base_discador(kpi_final: pd.DataFrame) -> pd.DataFrame | None:
+    """
+    Gera a base no formato do discador com as colunas:
+    TIPO_DE_REGISTRO;VALOR_DO_REGISTRO;MENSAGEM;NOME_CLIENTE;CPFCNPJ;CODCLIENTE;TAG;CORINGA1..5;PRIORIDADE
+    """
+    if kpi_final is None or kpi_final.empty:
+        return None
+
+    df = kpi_final.copy()
+
+    # 🔹 AJUSTE AQUI: nomes das colunas na SUA base KPI
+    # exemplo comum: "telefone", "celular", "whatsapp", "fone"
+    COL_TELEFONE = None
+    for c in df.columns:
+        if "tel" in c.lower() or "cel" in c.lower() or "whats" in c.lower() or "fone" in c.lower():
+            COL_TELEFONE = c
+            break
+
+    # exemplo comum: "nome", "nome_cliente", "aluno"
+    COL_NOME = None
+    for c in df.columns:
+        if "nome" in c.lower():
+            COL_NOME = c
+            break
+
+    # se você tiver CPF / código, o app já tenta:
+    COL_CPF = None
+    for c in df.columns:
+        if "cpf" in c.lower():
+            COL_CPF = c
+            break
+
+    COL_CODCLIENTE = None
+    for c in df.columns:
+        if "codcliente" in c.lower() or "matricula" in c.lower() or "id" == c.lower():
+            COL_CODCLIENTE = c
+            break
+
+    if COL_TELEFONE is None:
+        st.error("Não foi possível identificar a coluna de telefone na base KPI.")
+        return None
+
+    base = pd.DataFrame()
+
+    # 1) TIPO_DE_REGISTRO
+    base["TIPO_DE_REGISTRO"] = "TELEFONE"
+
+    # 2) VALOR_DO_REGISTRO → só números, como texto (sem notação científica)
+    base["VALOR_DO_REGISTRO"] = (
+        df[COL_TELEFONE]
+        .astype(str)
+        .str.replace(r"\D", "", regex=True)  # remove tudo que não é número
+    )
+
+    # 3) MENSAGEM (vazia, ou mude aqui se quiser texto fixo)
+    base["MENSAGEM"] = ""
+
+    # 4) NOME_CLIENTE
+    if COL_NOME:
+        base["NOME_CLIENTE"] = df[COL_NOME].astype(str)
+    else:
+        base["NOME_CLIENTE"] = ""
+
+    # 5) CPFCNPJ
+    if COL_CPF:
+        base["CPFCNPJ"] = df[COL_CPF].astype(str)
+    else:
+        base["CPFCNPJ"] = ""
+
+    # 6) CODCLIENTE
+    if COL_CODCLIENTE:
+        base["CODCLIENTE"] = df[COL_CODCLIENTE].astype(str)
+    else:
+        base["CODCLIENTE"] = ""
+
+    # 7) Campos extras vazios
+    base["TAG"] = ""
+    base["CORINGA1"] = ""
+    base["CORINGA2"] = ""
+    base["CORINGA3"] = ""
+    base["CORINGA4"] = ""
+    base["CORINGA5"] = ""
+    base["PRIORIDADE"] = ""
+
+    # Garante a ordem IGUAL ao seu exemplo
+    colunas_finais = [
+        "TIPO_DE_REGISTRO",
+        "VALOR_DO_REGISTRO",
+        "MENSAGEM",
+        "NOME_CLIENTE",
+        "CPFCNPJ",
+        "CODCLIENTE",
+        "TAG",
+        "CORINGA1",
+        "CORINGA2",
+        "CORINGA3",
+        "CORINGA4",
+        "CORINGA5",
+        "PRIORIDADE",
+    ]
+
+    base = base[colunas_finais]
+
+    return base
+
+
 st.subheader("1. Faça upload das bases")
 col1, col2 = st.columns(2)
 with col1:
