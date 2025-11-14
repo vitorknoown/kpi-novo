@@ -128,18 +128,36 @@ preview(painel_df, "Painel")
 st.markdown("---")
 st.subheader("3. Processamento e download")
 
+def df_vazio(df):
+    return (df is None) or (isinstance(df, pd.DataFrame) and df.empty)
+
 if st.button("Processar bases"):
-    if not any([kpi_df, fid_df, painel_df]):
-        st.error("Envie pelo menos uma base.")
+    # Se todas as bases forem None ou vazias, mostra erro
+    if all(df_vazio(df) for df in [kpi_df, fid_df, painel_df]):
+        st.error("Envie pelo menos uma base com dados para processar.")
     else:
         with st.spinner("Processando..."):
-            kpi_final, aba_nome, fidelizados, painel = preparar_bases(kpi_df, fid_df, painel_df)
+            kpi_final, aba_nome, fidelizados, painel = preparar_bases(
+                kpi_df, fid_df, painel_df
+            )
+
             buf = io.BytesIO()
             with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-                if kpi_final is not None: kpi_final.to_excel(writer, "kpi", index=False)
-                if aba_nome is not None: aba_nome.to_excel(writer, "nome", index=False)
-                if fidelizados is not None: fidelizados.to_excel(writer, "fidelizados", index=False)
-                if painel is not None: painel.to_excel(writer, "painel", index=False)
+                if kpi_final is not None:
+                    kpi_final.to_excel(writer, "kpi", index=False)
+                if aba_nome is not None:
+                    aba_nome.to_excel(writer, "nome", index=False)
+                if fidelizados is not None:
+                    fidelizados.to_excel(writer, "fidelizados", index=False)
+                if painel is not None:
+                    painel.to_excel(writer, "painel", index=False)
+
             buf.seek(0)
+
         st.success("Pronto!")
-        st.download_button("Baixar Excel Final", buf, "base_campanha_final.xlsx")
+        st.download_button(
+            "Baixar Excel Final",
+            buf,
+            "base_campanha_final.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
