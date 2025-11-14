@@ -130,6 +130,96 @@ st.subheader("3. Processamento e download")
 
 def df_vazio(df):
     return (df is None) or (isinstance(df, pd.DataFrame) and df.empty)
+    
+def detectar_coluna(df, candidatos):
+    """Tenta achar uma coluna baseada em pedaços de nome (ex: 'telefone', 'celular')."""
+    if df is None:
+        return None
+    for col in df.columns:
+        col_lower = str(col).lower()
+        for cand in candidatos:
+            if cand in col_lower:
+                return col
+    return None
+
+
+def gerar_base_discador(kpi_final: pd.DataFrame) -> pd.DataFrame | None:
+    """
+    Gera a base no formato:
+    TIPO_DE_REGISTRO;VALOR_DO_REGISTRO;MENSAGEM;NOME_CLIENTE;CPFCNPJ;...
+    usando, principalmente, a base KPI.
+    """
+    if kpi_final is None or kpi_final.empty:
+        return None
+
+    df = kpi_final.copy()
+
+    # Detecta possíveis colunas
+    col_tel = detectar_coluna(df, ["telefone", "celular", "whats", "whatsapp", "fone"])
+    col_nome = detectar_coluna(df, ["nome"])
+    col_cpf = detectar_coluna(df, ["cpf", "cpfcnpj"])
+    col_cod = detectar_coluna(df, ["codcliente", "id_cliente", "matricula", "id"])
+
+    if col_tel is None:
+        st.error("Não foi possível identificar a coluna de telefone na base KPI.")
+        return None
+
+    base = pd.DataFrame()
+
+    # 1) TIPO_DE_REGISTRO (fixo TELEFONE)
+    base["TIPO_DE_REGISTRO"] = "TELEFONE"
+
+    # 2) VALOR_DO_REGISTRO (telefone só com números)
+    base["VALOR_DO_REGISTRO"] = (
+        df[col_tel]
+        .astype(str)
+        .str.replace(r"\D", "", regex=True)  # remove tudo que não é número
+    )
+
+    # 3) MENSAGEM (vazia ou você pode colocar um texto fixo)
+    base["MENSAGEM"] = ""
+
+    # 4) NOME_CLIENTE
+    if col_nome:
+        base["NOME_CLIENTE"] = df[col_nome].astype(str)
+    else:
+        base["NOME_CLIENTE"] = ""
+
+    # 5) CPFCNPJ
+    if col_cpf:
+        base["CPFCNPJ"] = df[col_cpf].astype(str)
+    else:
+        base["CPFCNPJ"] = ""
+
+    # 6) CODCLIENTE
+    if col_cod:
+        base["CODCLIENTE"] = df[col_cod].astype(str)
+    else:
+        base["CODCLIENTE"] = ""
+
+    # 7) Demais campos vazios
+    for col in ["TAG", "CORINGA1", "CORINGA2", "CORINGA3", "CORINGA4", "CORINGA5", "PRIORIDADE"]:
+        base[col] = ""
+
+    # Garante a ordem das colunas
+    colunas_finais = [
+        "TIPO_DE_REGISTRO",
+        "VALOR_DO_REGISTRO",
+        "MENSAGEM",
+        "NOME_CLIENTE",
+        "CPFCNPJ",
+        "CODCLIENTE",
+        "TAG",
+        "CORINGA1",
+        "CORINGA2",
+        "CORINGA3",
+        "CORINGA4",
+        "CORINGA5",
+        "PRIORIDADE",
+    ]
+    base = base[colunas_finais]
+
+    return base
 
 if st.button("Processar bases"):
     # Se todas as bases forem None ou vazias, mostra erro
