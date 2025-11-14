@@ -130,7 +130,7 @@ def gerar_base_discador(kpi_final):
     # Identificar telefone
     COL_TELEFONE = None
     for c in df.columns:
-        if any(palavra in c.lower() for palavra in ["tel", "cel", "fone", "whats"]):
+        if any(p in c.lower() for p in ["tel", "cel", "fone", "whats"]):
             COL_TELEFONE = c
             break
 
@@ -189,6 +189,10 @@ def gerar_base_discador(kpi_final):
     return base[colunas]
 
 
+def df_vazio(df):
+    return (df is None) or (isinstance(df, pd.DataFrame) and df.empty)
+
+
 # ---------------------------
 # UPLOAD DAS BASES
 # ---------------------------
@@ -239,36 +243,33 @@ preview(fid_df, "Fidelizados")
 # ---------------------------
 
 st.markdown("---")
-st.subheader("3. Gerar base final para o discador")
+st.subheader("3. Gerar base final para o discador (Excel)")
 
-
-if st.button("Gerar CSV para discador"):
-    if kpi_df is None or kpi_df.empty:
+if st.button("Gerar Excel para discador"):
+    if df_vazio(kpi_df):
         st.error("A base KPI é obrigatória.")
     else:
         with st.spinner("Processando..."):
             kpi_final, aba_nome, fidelizados = preparar_bases(kpi_df, fid_df)
             base_discador = gerar_base_discador(kpi_final)
 
-        if base_discador is None or base_discador.empty:
+        if df_vazio(base_discador):
             st.error("Não foi possível gerar a base do discador.")
         else:
             st.success("Base gerada com sucesso!")
 
-            # CSV com ; e UTF-8-SIG
-            csv_buffer = io.StringIO()
-            base_discador.to_csv(
-                csv_buffer,
-                sep=";",
-                index=False,
-                encoding="utf-8-sig",
-            )
+            # 👉 AQUI: gera EXCEL (.xlsx) com o padrão do arquivo
+            output = io.BytesIO()
+            with pd.ExcelWriter(output) as writer:  # sem engine explícito
+                base_discador.to_excel(writer, index=False, sheet_name="Abandono")
+
+            output.seek(0)
 
             st.download_button(
-                "Baixar base para discador",
-                data=csv_buffer.getvalue().encode("utf-8-sig"),
-                file_name="base_abandono_discador.csv",
-                mime="text/csv",
+                "Baixar base para discador (Excel)",
+                data=output.getvalue(),
+                file_name="base_abandono_discador.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
 
 st.markdown("---")
