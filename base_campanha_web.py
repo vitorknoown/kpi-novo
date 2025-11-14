@@ -19,21 +19,38 @@ st.markdown("---")
 def carregar_arquivo(arquivo):
     if arquivo is None:
         return None
+
     nome = arquivo.name.lower()
+
+    # Se for CSV, tentamos várias codificações
     if nome.endswith(".csv"):
-        try:
-            return pd.read_csv(arquivo, sep=None, engine="python")
-        except Exception:
-            arquivo.seek(0)
-            return pd.read_csv(arquivo, sep=";")
+        for encoding in ["utf-8", "latin-1", "iso-8859-1", "cp1252", "utf-16"]:
+            try:
+                arquivo.seek(0)
+                return pd.read_csv(arquivo, encoding=encoding, sep=None, engine="python")
+            except Exception:
+                pass
+
+        # Última tentativa: tentar separador ";"
+        for encoding in ["utf-8", "latin-1", "iso-8859-1", "cp1252", "utf-16"]:
+            try:
+                arquivo.seek(0)
+                return pd.read_csv(arquivo, encoding=encoding, sep=";")
+            except Exception:
+                pass
+
+        raise ValueError("Erro ao ler o CSV — tente salvar novamente como UTF-8.")
+
+    # Arquivos Excel (mais seguros)
     elif nome.endswith((".xls", ".xlsx", ".xlsm", ".xlsb")):
         try:
             return pd.read_excel(arquivo, engine="openpyxl")
         except Exception:
             arquivo.seek(0)
             return pd.read_excel(arquivo)
+
     else:
-        raise ValueError("Tipo de arquivo não suportado.")
+        raise ValueError("Tipo de arquivo não suportado. Use CSV ou Excel.")
 
 def padronizar_colunas(df):
     df = df.copy()
