@@ -1,0 +1,128 @@
+import io
+import pandas as pd
+import streamlit as st
+
+st.set_page_config(page_title="Base Campanha", page_icon=":bar_chart:", layout="centered")
+
+LOGO_PATH = "Logo-Ejabrasil-sem-fundo.png.webp"
+
+try:
+    st.image(LOGO_PATH, width=260)
+except Exception:
+    st.warning("Logo não encontrada. Verifique o nome do arquivo de imagem na pasta do app.")
+
+st.title("Base Campanha")
+st.markdown("Organize e limpe suas bases de campanha de forma automática :rocket:")
+st.markdown("---")
+
+@st.cache_data
+def carregar_arquivo(arquivo):
+    if arquivo is None:
+        return None
+    nome = arquivo.name.lower()
+    if nome.endswith(".csv"):
+        try:
+            return pd.read_csv(arquivo, sep=None, engine="python")
+        except Exception:
+            arquivo.seek(0)
+            return pd.read_csv(arquivo, sep=";")
+    elif nome.endswith((".xls", ".xlsx", ".xlsm", ".xlsb")):
+        try:
+            return pd.read_excel(arquivo, engine="openpyxl")
+        except Exception:
+            arquivo.seek(0)
+            return pd.read_excel(arquivo)
+    else:
+        raise ValueError("Tipo de arquivo não suportado.")
+
+def padronizar_colunas(df):
+    df = df.copy()
+    df.columns = (df.columns.astype(str)
+        .str.strip().str.lower().str.replace(" ", "_")
+        .str.replace("ç","c").str.replace("ã","a").str.replace("á","a")
+        .str.replace("é","e").str.replace("í","i").str.replace("ó","o").str.replace("ú","u")
+    )
+    return df
+
+def tentar_identificar_cpf(df):
+    possiveis = ["cpf","cpf_cliente","cpf_aluno","cpf_cnpj"]
+    cols = [c.lower() for c in df.columns]
+    for c in possiveis:
+        if c in cols:
+            return c
+    return None
+
+def preparar_bases(kpi_df, fid_df, painel_df):
+    kpi_final = aba_nome = fidelizados = painel = None
+    if kpi_df is not None:
+        kpi_df = padronizar_colunas(kpi_df)
+        kpi_final = kpi_df.copy()
+        col_nome = next((c for c in kpi_df.columns if "nome" in c), None)
+        if col_nome:
+            aba_nome = kpi_df[[col_nome]].drop_duplicates().reset_index(drop=True)
+    if fid_df is not None:
+        fidelizados = padronizar_colunas(fid_df)
+    if painel_df is not None:
+        painel = padronizar_colunas(painel_df)
+    if kpi_final is not None and fidelizados is not None:
+        cpf_k = tentar_identificar_cpf(kpi_final)
+        cpf_f = tentar_identificar_cpf(fidelizados)
+        if cpf_k and cpf_f:
+            kpi_final["eh_fidelizado"] = kpi_final[cpf_k].isin(fidelizados[cpf_f])
+    if kpi_final is not None and painel is not None:
+        cpf_k = tentar_identificar_cpf(kpi_final)
+        cpf_p = tentar_identificar_cpf(painel)
+        if cpf_k and cpf_p:
+            painel_reduz = painel.drop_duplicates(subset=[cpf_p])
+            kpi_final = kpi_final.merge(
+                painel_reduz, left_on=cpf_k, right_on=cpf_p, how="left"
+            )
+    return kpi_final, aba_nome, fidelizados, painel
+
+st.subheader("1. Faça upload das bases")
+col1, col2 = st.columns(2)
+with col1:
+    kpi_file = st.file_uploader("Importar KPI", type=["xls","xlsx","xlsm","xlsb","csv"])
+with col2:
+    fid_file = st.file_uploader("Importar Fidelizados", type=["xls","xlsx","xlsm","xlsb","csv"])
+painel_file = st.file_uploader("Importar Painel", type=["xls","xlsx","xlsm","xlsb","csv"])
+
+st.markdown("---")
+st.subheader("2. Pré-visualização das bases")
+
+def preview(df, titulo):
+    if df is not None:
+        st.markdown(f"**{titulo}**")
+        st.write(f"Linhas: {df.shape[0]} | Colunas: {df.shape[1]}")
+        st.dataframe(df.head(10))
+    else:
+        st.info(f"Nenhum arquivo de {titulo} enviado.")
+
+kpi_df = fid_df = painel_df = None
+with st.spinner("Carregando arquivos..."):
+    if kpi_file: kpi_df = carregar_arquivo(kpi_file)
+    if fid_file: fid_df = carregar_arquivo(fid_file)
+    if painel_file: painel_df = carregar_arquivo(painel_file)
+
+preview(kpi_df, "KPI")
+preview(fid_df, "Fidelizados")
+preview(painel_df, "Painel")
+
+st.markdown("---")
+st.subheader("3. Processamento e download")
+
+if st.button("Processar bases"):
+    if not any([kpi_df, fid_df, painel_df]):
+        st.error("Envie pelo menos uma base.")
+    else:
+        with st.spinner("Processando..."):
+            kpi_final, aba_nome, fidelizados, painel = preparar_bases(kpi_df, fid_df, painel_df)
+            buf = io.BytesIO()
+            with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+                if kpi_final is not None: kpi_final.to_excel(writer, "kpi", index=False)
+                if aba_nome is not None: aba_nome.to_excel(writer, "nome", index=False)
+                if fidelizados is not None: fidelizados.to_excel(writer, "fidelizados", index=False)
+                if painel is not None: painel.to_excel(writer, "painel", index=False)
+            buf.seek(0)
+        st.success("Pronto!")
+        st.download_button("Baixar Excel Final", buf, "base_campanha_final.xlsx")
