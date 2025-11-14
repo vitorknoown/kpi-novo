@@ -2,313 +2,175 @@ import io
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Base Campanha", page_icon=":bar_chart:", layout="centered")
+# ---------------------------
+# CONFIG DA PÁGINA
+# ---------------------------
+st.set_page_config(
+    page_title="Base Campanha Abandono",
+    page_icon=":telephone_receiver:",
+    layout="centered",
+)
 
 LOGO_PATH = "Logo-Ejabrasil-sem-fundo.png.webp"
 
 try:
     st.image(LOGO_PATH, width=260)
 except Exception:
-    st.warning("Logo não encontrada. Verifique o nome do arquivo de imagem na pasta do app.")
+    st.warning("Logo não encontrada. Verifique o nome do arquivo de imagem.")
 
-st.title("Base Campanha")
-st.markdown("Organize e limpe suas bases de campanha de forma automática :rocket:")
+st.title("Base Campanha - Abandono")
+st.markdown("Gere o arquivo para o discador automaticamente :rocket:")
 st.markdown("---")
+
+
+# ---------------------------
+# FUNÇÕES AUXILIARES
+# ---------------------------
 
 @st.cache_data
 def carregar_arquivo(arquivo):
+    """Carrega arquivos CSV/Excel tentando várias codificações."""
     if arquivo is None:
         return None
 
     nome = arquivo.name.lower()
 
-    # Se for CSV, tentamos várias codificações
+    # CSV
     if nome.endswith(".csv"):
-        for encoding in ["utf-8", "latin-1", "iso-8859-1", "cp1252", "utf-16"]:
+        encodings = ["utf-8", "latin-1", "iso-8859-1", "cp1252", "utf-16"]
+        for enc in encodings:
             try:
                 arquivo.seek(0)
-                return pd.read_csv(arquivo, encoding=encoding, sep=None, engine="python")
+                return pd.read_csv(arquivo, sep=None, engine="python", encoding=enc)
+            except Exception:
+                pass
+        for enc in encodings:
+            try:
+                arquivo.seek(0)
+                return pd.read_csv(arquivo, sep=";", encoding=enc)
             except Exception:
                 pass
 
-        # Última tentativa: tentar separador ";"
-        for encoding in ["utf-8", "latin-1", "iso-8859-1", "cp1252", "utf-16"]:
-            try:
-                arquivo.seek(0)
-                return pd.read_csv(arquivo, encoding=encoding, sep=";")
-            except Exception:
-                pass
+        raise ValueError("Erro ao ler o CSV. Tente salvá-lo novamente em UTF-8.")
 
-        raise ValueError("Erro ao ler o CSV — tente salvar novamente como UTF-8.")
-
-    # Arquivos Excel (mais seguros)
+    # Excel
     elif nome.endswith((".xls", ".xlsx", ".xlsm", ".xlsb")):
         try:
-            return pd.read_excel(arquivo, engine="openpyxl")
-        except Exception:
             arquivo.seek(0)
             return pd.read_excel(arquivo)
+        except Exception as e:
+            raise ValueError(f"Erro ao ler Excel: {e}")
 
     else:
-        raise ValueError("Tipo de arquivo não suportado. Use CSV ou Excel.")
+        raise ValueError("Tipo de arquivo não suportado.")
+
 
 def padronizar_colunas(df):
     df = df.copy()
-    df.columns = (df.columns.astype(str)
-        .str.strip().str.lower().str.replace(" ", "_")
-        .str.replace("ç","c").str.replace("ã","a").str.replace("á","a")
-        .str.replace("é","e").str.replace("í","i").str.replace("ó","o").str.replace("ú","u")
+    df.columns = (
+        df.columns.astype(str)
+        .str.strip()
+        .str.lower()
+        .str.replace(" ", "_")
+        .str.replace("ç", "c")
+        .str.replace("á", "a")
+        .str.replace("ã", "a")
+        .str.replace("â", "a")
+        .str.replace("é", "e")
+        .str.replace("ê", "e")
+        .str.replace("í", "i")
+        .str.replace("ó", "o")
+        .str.replace("ô", "o")
+        .str.replace("ú", "u")
     )
     return df
 
+
 def tentar_identificar_cpf(df):
-    possiveis = ["cpf","cpf_cliente","cpf_aluno","cpf_cnpj"]
-    cols = [c.lower() for c in df.columns]
-    for c in possiveis:
-        if c in cols:
-            return c
+    possiveis = ["cpf", "cpf_cliente", "cpf_aluno", "cpfcnpj", "cpf_cnpj"]
+    for col in df.columns:
+        if col.lower() in possiveis:
+            return col
     return None
 
-def preparar_bases(kpi_df, fid_df, painel_df):
-    kpi_final = aba_nome = fidelizados = painel = None
+
+def preparar_bases(kpi_df, fid_df):
+    """Padroniza e cruza KPI x Fidelizados."""
+    kpi_final = aba_nome = fidelizados = None
+
     if kpi_df is not None:
         kpi_df = padronizar_colunas(kpi_df)
         kpi_final = kpi_df.copy()
+
         col_nome = next((c for c in kpi_df.columns if "nome" in c), None)
         if col_nome:
-            aba_nome = kpi_df[[col_nome]].drop_duplicates().reset_index(drop=True)
+            aba_nome = kpi_df[[col_nome]].drop_duplicates()
+
     if fid_df is not None:
         fidelizados = padronizar_colunas(fid_df)
-    if painel_df is not None:
-        painel = padronizar_colunas(painel_df)
+
+    # Cruzamento simples por CPF
     if kpi_final is not None and fidelizados is not None:
         cpf_k = tentar_identificar_cpf(kpi_final)
         cpf_f = tentar_identificar_cpf(fidelizados)
         if cpf_k and cpf_f:
             kpi_final["eh_fidelizado"] = kpi_final[cpf_k].isin(fidelizados[cpf_f])
-    if kpi_final is not None and painel is not None:
-        cpf_k = tentar_identificar_cpf(kpi_final)
-        cpf_p = tentar_identificar_cpf(painel)
-        if cpf_k and cpf_p:
-            painel_reduz = painel.drop_duplicates(subset=[cpf_p])
-            kpi_final = kpi_final.merge(
-                painel_reduz, left_on=cpf_k, right_on=cpf_p, how="left"
-            )
-    return kpi_final, aba_nome, fidelizados, painel
 
-def gerar_base_discador(kpi_final: pd.DataFrame) -> pd.DataFrame | None:
-    """
-    Gera a base no formato do discador com as colunas:
-    TIPO_DE_REGISTRO;VALOR_DO_REGISTRO;MENSAGEM;NOME_CLIENTE;CPFCNPJ;CODCLIENTE;TAG;CORINGA1..5;PRIORIDADE
-    """
+    return kpi_final, aba_nome, fidelizados
+
+
+def gerar_base_discador(kpi_final):
+    """Gera arquivo exatamente no formato do discador."""
+
     if kpi_final is None or kpi_final.empty:
         return None
 
     df = kpi_final.copy()
 
-    # 🔹 AJUSTE AQUI: nomes das colunas na SUA base KPI
-    # exemplo comum: "telefone", "celular", "whatsapp", "fone"
+    # Identificar telefone
     COL_TELEFONE = None
     for c in df.columns:
-        if "tel" in c.lower() or "cel" in c.lower() or "whats" in c.lower() or "fone" in c.lower():
+        if any(palavra in c.lower() for palavra in ["tel", "cel", "fone", "whats"]):
             COL_TELEFONE = c
             break
 
-    # exemplo comum: "nome", "nome_cliente", "aluno"
-    COL_NOME = None
-    for c in df.columns:
-        if "nome" in c.lower():
-            COL_NOME = c
-            break
-
-    # se você tiver CPF / código, o app já tenta:
-    COL_CPF = None
-    for c in df.columns:
-        if "cpf" in c.lower():
-            COL_CPF = c
-            break
-
-    COL_CODCLIENTE = None
-    for c in df.columns:
-        if "codcliente" in c.lower() or "matricula" in c.lower() or "id" == c.lower():
-            COL_CODCLIENTE = c
-            break
-
     if COL_TELEFONE is None:
-        st.error("Não foi possível identificar a coluna de telefone na base KPI.")
+        st.error("Não foi possível identificar a coluna de telefone na KPI.")
         return None
 
-    base = pd.DataFrame()
+    # Identificar nome
+    COL_NOME = next((c for c in df.columns if "nome" in c.lower()), None)
 
-    # 1) TIPO_DE_REGISTRO
+    # Identificar CPF
+    COL_CPF = tentar_identificar_cpf(df)
+
+    # identificar algum código identificador
+    COL_COD = next(
+        (c for c in df.columns if c.lower() in ["id", "matricula", "codcliente"]),
+        None,
+    )
+
+    base = pd.DataFrame()
     base["TIPO_DE_REGISTRO"] = "TELEFONE"
 
-    # 2) VALOR_DO_REGISTRO → só números, como texto (sem notação científica)
     base["VALOR_DO_REGISTRO"] = (
         df[COL_TELEFONE]
         .astype(str)
-        .str.replace(r"\D", "", regex=True)  # remove tudo que não é número
+        .str.replace(r"\D", "", regex=True)
     )
 
-    # 3) MENSAGEM (vazia, ou mude aqui se quiser texto fixo)
     base["MENSAGEM"] = ""
 
-    # 4) NOME_CLIENTE
-    if COL_NOME:
-        base["NOME_CLIENTE"] = df[COL_NOME].astype(str)
-    else:
-        base["NOME_CLIENTE"] = ""
+    base["NOME_CLIENTE"] = df[COL_NOME].astype(str) if COL_NOME else ""
 
-    # 5) CPFCNPJ
-    if COL_CPF:
-        base["CPFCNPJ"] = df[COL_CPF].astype(str)
-    else:
-        base["CPFCNPJ"] = ""
+    base["CPFCNPJ"] = df[COL_CPF].astype(str) if COL_CPF else ""
 
-    # 6) CODCLIENTE
-    if COL_CODCLIENTE:
-        base["CODCLIENTE"] = df[COL_CODCLIENTE].astype(str)
-    else:
-        base["CODCLIENTE"] = ""
+    base["CODCLIENTE"] = df[COL_COD].astype(str) if COL_COD else ""
 
-    # 7) Campos extras vazios
-    base["TAG"] = ""
-    base["CORINGA1"] = ""
-    base["CORINGA2"] = ""
-    base["CORINGA3"] = ""
-    base["CORINGA4"] = ""
-    base["CORINGA5"] = ""
-    base["PRIORIDADE"] = ""
-
-    # Garante a ordem IGUAL ao seu exemplo
-    colunas_finais = [
-        "TIPO_DE_REGISTRO",
-        "VALOR_DO_REGISTRO",
-        "MENSAGEM",
-        "NOME_CLIENTE",
-        "CPFCNPJ",
-        "CODCLIENTE",
-        "TAG",
-        "CORINGA1",
-        "CORINGA2",
-        "CORINGA3",
-        "CORINGA4",
-        "CORINGA5",
-        "PRIORIDADE",
-    ]
-
-    base = base[colunas_finais]
-
-    return base
-
-
-st.subheader("1. Faça upload das bases")
-col1, col2 = st.columns(2)
-with col1:
-    kpi_file = st.file_uploader("Importar KPI", type=["xls","xlsx","xlsm","xlsb","csv"])
-with col2:
-    fid_file = st.file_uploader("Importar Fidelizados", type=["xls","xlsx","xlsm","xlsb","csv"])
-painel_file = st.file_uploader("Importar Painel", type=["xls","xlsx","xlsm","xlsb","csv"])
-
-st.markdown("---")
-st.subheader("2. Pré-visualização das bases")
-
-def preview(df, titulo):
-    if df is not None:
-        st.markdown(f"**{titulo}**")
-        st.write(f"Linhas: {df.shape[0]} | Colunas: {df.shape[1]}")
-        st.dataframe(df.head(10))
-    else:
-        st.info(f"Nenhum arquivo de {titulo} enviado.")
-
-kpi_df = fid_df = painel_df = None
-with st.spinner("Carregando arquivos..."):
-    if kpi_file: kpi_df = carregar_arquivo(kpi_file)
-    if fid_file: fid_df = carregar_arquivo(fid_file)
-    if painel_file: painel_df = carregar_arquivo(painel_file)
-
-preview(kpi_df, "KPI")
-preview(fid_df, "Fidelizados")
-preview(painel_df, "Painel")
-
-st.markdown("---")
-st.subheader("3. Processamento e download")
-
-def df_vazio(df):
-    return (df is None) or (isinstance(df, pd.DataFrame) and df.empty)
-    
-def detectar_coluna(df, candidatos):
-    """Tenta achar uma coluna baseada em pedaços de nome (ex: 'telefone', 'celular')."""
-    if df is None:
-        return None
-    for col in df.columns:
-        col_lower = str(col).lower()
-        for cand in candidatos:
-            if cand in col_lower:
-                return col
-    return None
-
-
-def gerar_base_discador(kpi_final: pd.DataFrame) -> pd.DataFrame | None:
-    """
-    Gera a base no formato:
-    TIPO_DE_REGISTRO;VALOR_DO_REGISTRO;MENSAGEM;NOME_CLIENTE;CPFCNPJ;...
-    usando, principalmente, a base KPI.
-    """
-    if kpi_final is None or kpi_final.empty:
-        return None
-
-    df = kpi_final.copy()
-
-    # Detecta possíveis colunas
-    col_tel = detectar_coluna(df, ["telefone", "celular", "whats", "whatsapp", "fone"])
-    col_nome = detectar_coluna(df, ["nome"])
-    col_cpf = detectar_coluna(df, ["cpf", "cpfcnpj"])
-    col_cod = detectar_coluna(df, ["codcliente", "id_cliente", "matricula", "id"])
-
-    if col_tel is None:
-        st.error("Não foi possível identificar a coluna de telefone na base KPI.")
-        return None
-
-    base = pd.DataFrame()
-
-    # 1) TIPO_DE_REGISTRO (fixo TELEFONE)
-    base["TIPO_DE_REGISTRO"] = "TELEFONE"
-
-    # 2) VALOR_DO_REGISTRO (telefone só com números)
-    base["VALOR_DO_REGISTRO"] = (
-        df[col_tel]
-        .astype(str)
-        .str.replace(r"\D", "", regex=True)  # remove tudo que não é número
-    )
-
-    # 3) MENSAGEM (vazia ou você pode colocar um texto fixo)
-    base["MENSAGEM"] = ""
-
-    # 4) NOME_CLIENTE
-    if col_nome:
-        base["NOME_CLIENTE"] = df[col_nome].astype(str)
-    else:
-        base["NOME_CLIENTE"] = ""
-
-    # 5) CPFCNPJ
-    if col_cpf:
-        base["CPFCNPJ"] = df[col_cpf].astype(str)
-    else:
-        base["CPFCNPJ"] = ""
-
-    # 6) CODCLIENTE
-    if col_cod:
-        base["CODCLIENTE"] = df[col_cod].astype(str)
-    else:
-        base["CODCLIENTE"] = ""
-
-    # 7) Demais campos vazios
     for col in ["TAG", "CORINGA1", "CORINGA2", "CORINGA3", "CORINGA4", "CORINGA5", "PRIORIDADE"]:
         base[col] = ""
 
-    # Garante a ordem das colunas
-    colunas_finais = [
+    colunas = [
         "TIPO_DE_REGISTRO",
         "VALOR_DO_REGISTRO",
         "MENSAGEM",
@@ -323,31 +185,77 @@ def gerar_base_discador(kpi_final: pd.DataFrame) -> pd.DataFrame | None:
         "CORINGA5",
         "PRIORIDADE",
     ]
-    base = base[colunas_finais]
 
-    return base
+    return base[colunas]
 
-def df_vazio(df):
-    return (df is None) or (isinstance(df, pd.DataFrame) and df.empty)
 
-if st.button("Processar bases"):
-    if all(df_vazio(df) for df in [kpi_df, fid_df, painel_df]):
-        st.error("Envie pelo menos uma base com dados para processar.")
+# ---------------------------
+# UPLOAD DAS BASES
+# ---------------------------
+
+st.subheader("1. Upload das bases")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    kpi_file = st.file_uploader(
+        "Base KPI (obrigatória)",
+        type=["xls", "xlsx", "xlsm", "xlsb", "csv"],
+    )
+
+with col2:
+    fid_file = st.file_uploader(
+        "Base Fidelizados (opcional)",
+        type=["xls", "xlsx", "xlsm", "xlsb", "csv"],
+    )
+
+st.markdown("---")
+st.subheader("2. Visualização")
+
+
+def preview(df, titulo):
+    if df is None or df.empty:
+        st.info(f"Nenhum arquivo enviado para {titulo}.")
+    else:
+        st.markdown(f"**{titulo}**")
+        st.write(f"{df.shape[0]} linhas | {df.shape[1]} colunas")
+        st.dataframe(df.head(10))
+
+
+# Carregar arquivos
+kpi_df = fid_df = None
+
+with st.spinner("Carregando arquivos..."):
+    if kpi_file:
+        kpi_df = carregar_arquivo(kpi_file)
+    if fid_file:
+        fid_df = carregar_arquivo(fid_file)
+
+preview(kpi_df, "KPI")
+preview(fid_df, "Fidelizados")
+
+# ---------------------------
+# PROCESSAMENTO E DOWNLOAD
+# ---------------------------
+
+st.markdown("---")
+st.subheader("3. Gerar base final para o discador")
+
+
+if st.button("Gerar CSV para discador"):
+    if kpi_df is None or kpi_df.empty:
+        st.error("A base KPI é obrigatória.")
     else:
         with st.spinner("Processando..."):
-            kpi_final, aba_nome, fidelizados, painel = preparar_bases(
-                kpi_df, fid_df, painel_df
-            )
-
-            # Gera a base no formato do discador (base CSV)
+            kpi_final, aba_nome, fidelizados = preparar_bases(kpi_df, fid_df)
             base_discador = gerar_base_discador(kpi_final)
 
         if base_discador is None or base_discador.empty:
-            st.error("Não foi possível gerar a base no formato do discador.")
+            st.error("Não foi possível gerar a base do discador.")
         else:
             st.success("Base gerada com sucesso!")
 
-            # Gera CSV no formato certo: ; e UTF-8-SIG
+            # CSV com ; e UTF-8-SIG
             csv_buffer = io.StringIO()
             base_discador.to_csv(
                 csv_buffer,
@@ -355,11 +263,13 @@ if st.button("Processar bases"):
                 index=False,
                 encoding="utf-8-sig",
             )
-            csv_bytes = csv_buffer.getvalue().encode("utf-8-sig")
 
             st.download_button(
                 "Baixar base para discador",
-                data=csv_bytes,
-                file_name="base_discador.csv",
+                data=csv_buffer.getvalue().encode("utf-8-sig"),
+                file_name="base_abandono_discador.csv",
                 mime="text/csv",
             )
+
+st.markdown("---")
+st.caption("EJA Brasil • Geração automática de base para campanha de abandono.")
